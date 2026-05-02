@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 # ============================================================
 # IPK-RDT Test Suite – automatické testy pro submission_prep/
 # Spustí: ./run_tests.sh
