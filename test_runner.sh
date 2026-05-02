@@ -1,4 +1,4 @@
-#!/bin/sh#!/bin/sh
+#!/bin/sh
 # ============================================================
 # IPK-RDT POSIX test runner – funguje v Nix /bin/sh
 # Spusť: ./test_runner.sh
