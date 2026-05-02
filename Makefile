@@ -2,7 +2,7 @@
 # Student: Lukas Dudek
 
 BINARY_NAME=ipk-rdt
-SRC=main.go sender.go receiver.go
+SRC=main.go sender.go receiver.go protocol.go
 
 all: build
 
