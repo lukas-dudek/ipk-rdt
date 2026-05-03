@@ -129,7 +129,7 @@ func runClient(cfg *Config) error {
 	window := make(map[uint32]*windowPacket)
 	baseSeq := uint32(0)
 	nextSeq := uint32(0)
-	windowLimit := 32 // max packets in flight
+	windowLimit := 16 // max packets in flight
 	eof := false
 
 	timeoutDur = time.Duration(cfg.Timeout) * time.Second
@@ -240,9 +240,10 @@ func runClient(cfg *Config) error {
 				conn.Write(wp.bytesRaw)
 				time.Sleep(1 * time.Millisecond) // Pacing
 				wp.sentAt = now // restart timer
+				lastProgress = now  // retransmit = we're alive, reset inactivity clock
 				wp.rto = wp.rto * 2 // backoff
-				if wp.rto > 4 * time.Second {
-					wp.rto = 4 * time.Second
+				if wp.rto > 1500*time.Millisecond {
+					wp.rto = 1500 * time.Millisecond
 				}
 			}
 		}
