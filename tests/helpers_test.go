@@ -22,7 +22,7 @@ var buildErr error
 // buildBinary sestaví binárku jednou
 func buildBinary() error {
 	buildOnce.Do(func() {
-		cmd := exec.Command("go", "build", "-o", binaryPath)
+		cmd := exec.Command("go", "build", "-o", "ipk-rdt")
 		cmd.Dir = buildDir
 		out, err := cmd.CombinedOutput()
 		if err != nil {
