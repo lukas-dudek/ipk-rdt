@@ -3,6 +3,7 @@ package tests
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -182,8 +183,8 @@ func TestTransfer_StdinToFile(t *testing.T) {
 		"-s", "-p", "30009", "-a", "127.0.0.1",
 		"-o", out, "-w", "5",
 	)
-	cmdSrv.Stdout = os.Discard
-	cmdSrv.Stderr = os.Discard
+	cmdSrv.Stdout = io.Discard
+	cmdSrv.Stderr = io.Discard
 	if err := cmdSrv.Start(); err != nil {
 		t.Fatalf("server start: %v", err)
 	}
@@ -194,8 +195,8 @@ func TestTransfer_StdinToFile(t *testing.T) {
 		"-i", "-", "-w", "5",
 	)
 	cmdCli.Stdin = bytes.NewReader(data)
-	cmdCli.Stdout = os.Discard
-	cmdCli.Stderr = os.Discard
+	cmdCli.Stdout = io.Discard
+	cmdCli.Stderr = io.Discard
 	if err := cmdCli.Run(); err != nil {
 		t.Fatalf("client: %v", err)
 	}
@@ -221,7 +222,7 @@ func TestTransfer_FileToStdout(t *testing.T) {
 		"-o", "-", "-w", "5",
 	)
 	cmdSrv.Stdout = &outBuf
-	cmdSrv.Stderr = os.Discard
+	cmdSrv.Stderr = io.Discard
 	if err := cmdSrv.Start(); err != nil {
 		t.Fatalf("server start: %v", err)
 	}
@@ -250,7 +251,7 @@ func TestTransfer_StdinToStdout(t *testing.T) {
 		"-o", "-", "-w", "5",
 	)
 	cmdSrv.Stdout = &outBuf
-	cmdSrv.Stderr = os.Discard
+	cmdSrv.Stderr = io.Discard
 	if err := cmdSrv.Start(); err != nil {
 		t.Fatalf("server start: %v", err)
 	}
@@ -261,8 +262,8 @@ func TestTransfer_StdinToStdout(t *testing.T) {
 		"-i", "-", "-w", "5",
 	)
 	cmdCli.Stdin = bytes.NewReader(data)
-	cmdCli.Stdout = os.Discard
-	cmdCli.Stderr = os.Discard
+	cmdCli.Stdout = io.Discard
+	cmdCli.Stderr = io.Discard
 	if err := cmdCli.Run(); err != nil {
 		t.Fatalf("client: %v", err)
 	}
@@ -289,8 +290,8 @@ func TestTransfer_IPv6(t *testing.T) {
 		"-s", "-p", "30012", "-a", "::1",
 		"-o", out, "-w", "5",
 	)
-	cmdSrv.Stdout = os.Discard
-	cmdSrv.Stderr = os.Discard
+	cmdSrv.Stdout = io.Discard
+	cmdSrv.Stderr = io.Discard
 	if err := cmdSrv.Start(); err != nil {
 		t.Skipf("IPv6 probably not supported: %v", err)
 		return
@@ -301,8 +302,8 @@ func TestTransfer_IPv6(t *testing.T) {
 		"-c", "-a", "::1", "-p", "30012",
 		"-i", in, "-w", "5",
 	)
-	cmdCli.Stdout = os.Discard
-	cmdCli.Stderr = os.Discard
+	cmdCli.Stdout = io.Discard
+	cmdCli.Stderr = io.Discard
 	if err := cmdCli.Run(); err != nil {
 		// IPv6 maybe not available – treat as skip
 		t.Skipf("IPv6 client failed (maybe not available): %v", err)
