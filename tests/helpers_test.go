@@ -128,6 +128,14 @@ type impairmentConfig struct {
 	jitterMs   int
 }
 
+// runProxy spustí obousměrnou UDP proxy se simulací chyb sítě.
+//
+// Architektura: dva sockety, dvě goroutiny.
+//   - clientConn naslouchá na listenAddr (klient se připojuje sem)
+//   - serverConn je připojený přímo na targetAddr (server)
+//
+// Goroutina A: čte od klienta -> aplikuje impairment -> posílá serveru (přes serverConn)
+// Goroutina B: čte od serveru  -> aplikuje impairment -> posílá klientovi (přes clientConn)
 func runProxy(t *testing.T, listenAddr, targetAddr string, cfg impairmentConfig) (stop func()) {
 	t.Helper()
 
@@ -140,84 +148,109 @@ func runProxy(t *testing.T, listenAddr, targetAddr string, cfg impairmentConfig)
 		t.Fatalf("proxy target addr: %v", err)
 	}
 
-	conn, err := net.ListenUDP("udp", laddr)
+	// Socket facing the client
+	clientConn, err := net.ListenUDP("udp", laddr)
 	if err != nil {
-		t.Fatalf("proxy listen: %v", err)
+		t.Fatalf("proxy client listen: %v", err)
+	}
+
+	// Socket facing the server (ephemeral local port, connected to server)
+	serverConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		clientConn.Close()
+		t.Fatalf("proxy server socket: %v", err)
 	}
 
 	stopCh := make(chan struct{})
 	var wg sync.WaitGroup
+
+	// Track the last seen client address so server replies can be routed back
+	var clientAddrMu sync.Mutex
+	var activeClient *net.UDPAddr
+
+	// mayApply returns true if we should apply a percentage-based impairment
+	mayApply := func(pct int) bool {
+		return pct > 0 && randInt(100) < pct
+	}
+
+	// forwardWithImpairment applies loss/dup/delay to a packet and sends it
+	forwardWithImpairment := func(conn *net.UDPConn, dest *net.UDPAddr, data []byte) {
+		// loss
+		if mayApply(cfg.lossPct) {
+			return
+		}
+		// duplicate: send an extra copy with the same delay
+		if mayApply(cfg.dupPct) {
+			go sendDelayed(conn, dest, data, cfg.delayMs, cfg.jitterMs)
+		}
+		sendDelayed(conn, dest, data, cfg.delayMs, cfg.jitterMs)
+	}
+
+	// Goroutine A: Client -> Server
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		defer conn.Close()
-
-		var mu sync.Mutex
-		lastPacket := make(map[string]*pendingPacket)
-
-		var activeClient *net.UDPAddr
-
 		buf := make([]byte, 4096)
 		for {
-			select {
-			case <-stopCh:
-				return
-			default:
-			}
-			conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
-			n, clientAddr, err := conn.ReadFromUDP(buf)
+			clientConn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+			n, cAddr, err := clientConn.ReadFromUDP(buf)
 			if err != nil {
-				continue
+				select {
+				case <-stopCh:
+					return
+				default:
+					continue
+				}
 			}
 			data := make([]byte, n)
 			copy(data, buf[:n])
 
-			destAddr := taddr
-			if clientAddr.String() == taddr.String() {
-				// Packet from server -> route to client
-				if activeClient == nil {
-					continue // nowhere to send
+			// Remember which client we're talking to
+			clientAddrMu.Lock()
+			activeClient = cAddr
+			clientAddrMu.Unlock()
+
+			go forwardWithImpairment(serverConn, taddr, data)
+		}
+	}()
+
+	// Goroutine B: Server -> Client
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		buf := make([]byte, 4096)
+		for {
+			serverConn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+			n, _, err := serverConn.ReadFromUDP(buf)
+			if err != nil {
+				select {
+				case <-stopCh:
+					return
+				default:
+					continue
 				}
-				destAddr = activeClient
-			} else {
-				// Packet from client -> route to server, remember client
-				activeClient = clientAddr
+			}
+			data := make([]byte, n)
+			copy(data, buf[:n])
+
+			clientAddrMu.Lock()
+			dest := activeClient
+			clientAddrMu.Unlock()
+
+			if dest == nil {
+				continue // client hasn't sent anything yet
 			}
 
-			// loss
-			if cfg.lossPct > 0 && randInt(100) < cfg.lossPct {
-				continue
-			}
-			// duplicate
-			if cfg.dupPct > 0 && randInt(100) < cfg.dupPct {
-				go sendDelayed(conn, destAddr, data, cfg.delayMs, cfg.jitterMs)
-			}
-			// reorder
-			clientKey := clientAddr.String()
-			mu.Lock()
-			pending := lastPacket[clientKey]
-			if cfg.reorderPct > 0 && pending != nil && randInt(100) < cfg.reorderPct {
-				lastPacket[clientKey] = &pendingPacket{data: data, addr: clientAddr}
-				mu.Unlock()
-				go sendDelayed(conn, destAddr, data, cfg.delayMs, cfg.jitterMs)
-				go sendDelayed(conn, destAddr, pending.data, cfg.delayMs, cfg.jitterMs)
-				continue
-			}
-			lastPacket[clientKey] = &pendingPacket{data: data, addr: clientAddr}
-			mu.Unlock()
-			go sendDelayed(conn, destAddr, data, cfg.delayMs, cfg.jitterMs)
+			go forwardWithImpairment(clientConn, dest, data)
 		}
 	}()
 
 	return func() {
 		close(stopCh)
+		clientConn.Close()
+		serverConn.Close()
 		wg.Wait()
 	}
-}
-
-type pendingPacket struct {
-	data []byte
-	addr *net.UDPAddr
 }
 
 func randInt(max int) int {
