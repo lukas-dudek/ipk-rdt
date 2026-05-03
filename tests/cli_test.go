@@ -18,7 +18,7 @@ func TestCLI_InvalidArgs(t *testing.T) {
 	}{
 		{"no mode", []string{}, "either -s or -c"},
 		{"both modes", []string{"-s", "-c", "-p", "1234"}, "both server and client"},
-		{"no port", []string{"-s"}, "missing or invalid port"},
+		{"no port", []string{"-s"}, "missing port"},
 		{"invalid port", []string{"-s", "-p", "abc"}, ""},
 		{"negative port", []string{"-s", "-p", "-1"}, ""},
 		{"port too high", []string{"-s", "-p", "99999"}, ""},

@@ -9,28 +9,28 @@ import (
 )
 
 func runClient(cfg *Config) error {
-	fmt.Fprintf(os.Stderr, "Starting client to send to %s:%d (timeout: %ds)\n", cfg.Host, cfg.Port, cfg.Timeout)
+	logf("Starting client to send to %s:%d (timeout: %ds)\n", cfg.Host, cfg.Port, cfg.Timeout)
 	if cfg.Input != "" && cfg.Input != "-" {
-		fmt.Fprintf(os.Stderr, "Will read from file: %s\n", cfg.Input)
+		logf("read from file %s\n", cfg.Input)
 	} else {
-		fmt.Fprintf(os.Stderr, "Will read from stdin\n")
+		logf("read from stdin\n")
 	}
 
 	// resolve address
 	addrStr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
 	serverAddr, err := net.ResolveUDPAddr("udp", addrStr)
 	if err != nil {
-		return fmt.Errorf("bad address: %v", err)
+		return fmt.Errorf("bad address %v", err)
 	}
 
 	// create socket
 	conn, err := net.DialUDP("udp", nil, serverAddr)
 	if err != nil {
-		return fmt.Errorf("cannot dial: %v", err)
+		return fmt.Errorf("cannot dial %v", err)
 	}
 	defer conn.Close()
 
-	// get random connID for this session
+	// random connID
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 	connId := rng.Uint32()
 
@@ -42,10 +42,10 @@ func runClient(cfg *Config) error {
 		SeqNum: 0,
 		AckNum: 0,
 	}
-	
-	fmt.Fprintln(os.Stderr, "Sending SYN...")
-	
-	// Retransmission loop for SYN
+
+	logf("Sending SYN\n")
+
+	// retransmision loop for SYN
 	handshakeStart := time.Now()
 	timeoutDur := time.Duration(cfg.Timeout) * time.Second
 	gotSynack := false
@@ -58,20 +58,20 @@ func runClient(cfg *Config) error {
 
 		_, err = conn.Write(syn.ToBytes())
 		if err != nil {
-			return fmt.Errorf("failed to send SYN: %v", err)
+			return fmt.Errorf("failed to send SYN %v", err)
 		}
 
-		// wait for SYNACK with short timeout
+		// wait for SYNACK with timeout
 		conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
 		n, _, err := conn.ReadFromUDP(buffer)
 		if err != nil {
-			// timeout, loop again and retransmit
+			// loop again and retransmit
 			continue
 		}
 
 		resp, err := ParsePacket(buffer[:n])
 		if err == nil && resp.Type == TYPE_SYNACK && resp.ConnId == connId {
-			fmt.Fprintln(os.Stderr, "Got SYNACK")
+			logf("Got SYNACK\n")
 			gotSynack = true
 		}
 	}
@@ -85,7 +85,7 @@ func runClient(cfg *Config) error {
 		AckNum: 0,
 	}
 	conn.Write(ack.ToBytes())
-	fmt.Fprintln(os.Stderr, "Sent ACK, connection established")
+	logf("Sent ACK connection established\n")
 
 	// prepare input file or stdin
 	var inputFile *os.File
@@ -94,13 +94,13 @@ func runClient(cfg *Config) error {
 	} else {
 		f, err := os.Open(cfg.Input)
 		if err != nil {
-			return fmt.Errorf("cannot open input file: %v", err)
+			return fmt.Errorf("cannot open input file %v", err)
 		}
 		defer f.Close()
 		inputFile = f
 	}
 
-	fmt.Fprintln(os.Stderr, "Start sending data with sliding window...")
+	logf("start sending data with sliding window\n")
 	dataBuf := make([]byte, MAX_PAYLOAD)
 
 	// receive packets in background
@@ -159,21 +159,20 @@ func runClient(cfg *Config) error {
 					AckNum:  0,
 					Payload: chunk,
 				}
-				
+
 				rawBytes := dataPkt.ToBytes()
 				conn.Write(rawBytes)
-				time.Sleep(1 * time.Millisecond) // Pacing to prevent kernel UDP buffer overflow
-				// fmt.Fprintf(os.Stderr, "Sent DATA seq=%d\n", nextSeq)
-				
+				time.Sleep(1 * time.Millisecond) // pacing to prevent buffer overflow
+
 				window[nextSeq] = &windowPacket{
 					bytesRaw: rawBytes,
 					sentAt:   time.Now(),
 					rto:      500 * time.Millisecond,
 				}
-				
+
 				nextSeq += uint32(n)
 			}
-			
+
 			if err != nil {
 				eof = true
 			}
@@ -182,7 +181,7 @@ func runClient(cfg *Config) error {
 		// process acks or wait a little
 		select {
 		case p := <-packetCh:
-			lastProgress = time.Now() // any packet means server is alive
+			lastProgress = time.Now() // server is alive
 			if p.Type == TYPE_ACK {
 				ack := p.AckNum
 				if ack > baseSeq {
@@ -191,10 +190,10 @@ func runClient(cfg *Config) error {
 				} else if ack == baseSeq {
 					dupAckCount++
 					if dupAckCount == 3 {
-						// Fast retransmit
+						// fast retransmit
 						if wp, ok := window[baseSeq]; ok {
 							conn.Write(wp.bytesRaw)
-							time.Sleep(1 * time.Millisecond) // Pacing
+							time.Sleep(1 * time.Millisecond) // pacing
 						}
 					}
 				}
@@ -204,7 +203,7 @@ func runClient(cfg *Config) error {
 					}
 				}
 			}
-			// Drain remaining packets in channel
+			// delete packets remaining in channel
 			for len(packetCh) > 0 {
 				p := <-packetCh
 				if p.Type == TYPE_ACK {
@@ -217,7 +216,7 @@ func runClient(cfg *Config) error {
 						if dupAckCount == 3 {
 							if wp, ok := window[baseSeq]; ok {
 								conn.Write(wp.bytesRaw)
-								time.Sleep(1 * time.Millisecond) // Pacing
+								time.Sleep(1 * time.Millisecond) // pacing
 							}
 						}
 					}
@@ -229,18 +228,17 @@ func runClient(cfg *Config) error {
 				}
 			}
 		case <-time.After(10 * time.Millisecond):
-			// tick
 		}
 
 		// check timeouts
 		now := time.Now()
 		for seq, wp := range window {
 			if now.Sub(wp.sentAt) > wp.rto {
-				fmt.Fprintf(os.Stderr, "Timeout seq=%d, retransmitting\n", seq)
+				logf("Timeout seq=%d, retransmitting\n", seq)
 				conn.Write(wp.bytesRaw)
-				time.Sleep(1 * time.Millisecond) // Pacing
-				wp.sentAt = now // restart timer
-				wp.rto = wp.rto * 2 // backoff
+				time.Sleep(1 * time.Millisecond)
+				wp.sentAt = now
+				wp.rto = wp.rto * 2
 				if wp.rto > 1500*time.Millisecond {
 					wp.rto = 1500 * time.Millisecond
 				}
@@ -248,9 +246,9 @@ func runClient(cfg *Config) error {
 		}
 	}
 
-	fmt.Fprintln(os.Stderr, "All data sent and acked")
+	logf("all data sent and acked\n")
 
-	// Teardown send FIN
+	// teardown send FIN
 	fin := Packet{
 		Magic:  MAGIC_BYTE,
 		Type:   TYPE_FIN,
@@ -259,26 +257,26 @@ func runClient(cfg *Config) error {
 		AckNum: 0,
 	}
 
-	fmt.Fprintln(os.Stderr, "Sending FIN...")
-	
+	logf("Sending FIN\n")
+
 	teardownStart := time.Now()
 	gotFinack := false
-	
+
 	for !gotFinack {
 		if time.Since(teardownStart) > timeoutDur {
 			return fmt.Errorf("timeout waiting for FINACK")
 		}
 
 		conn.Write(fin.ToBytes())
-		
+
 		select {
 		case p := <-packetCh:
 			if p.Type == TYPE_FINACK {
-				fmt.Fprintln(os.Stderr, "Got FINACK, closing connection")
+				logf("Got FINACK, closing connection\n")
 				gotFinack = true
 			}
 		case <-time.After(500 * time.Millisecond):
-			// timeout, loop and retransmit FIN
+			// loop and retransmit FIN
 		}
 	}
 

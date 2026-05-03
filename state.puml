@@ -1,0 +1,9 @@
+@startuml
+[*] --> LISTEN
+LISTEN --> SYN_RECEIVED : přišel SYN
+SYN_RECEIVED --> ESTABLISHED : přišel ACK (nebo rovnou DATA/FIN)
+ESTABLISHED --> FIN_RECEIVED : přišel FIN
+FIN_RECEIVED --> TIME_WAIT : data zapsána, FINACK odeslán
+TIME_WAIT --> [*] : po 2 sekundách
+ESTABLISHED --> [*] : timeout
+@enduml

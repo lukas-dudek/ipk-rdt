@@ -1,0 +1,18 @@
+@startuml
+participant Client
+participant Server
+
+Client -> Server : SYN (ConnId=X)
+Server -> Client : SYNACK (ConnId=X)
+Client -> Server : ACK
+
+loop Pro každý kus dat
+    Client -> Server : DATA (SeqNum=N, payload)
+    Server -> Client : ACK (AckNum=N+len)
+end
+
+Client -> Server : FIN (SeqNum=final)
+Server -> Client : FINACK
+
+note right of Server: TIME_WAIT 2s
+@enduml

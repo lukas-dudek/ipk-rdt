@@ -6,7 +6,6 @@ import (
 	"hash/crc32"
 )
 
-// my packet types
 const (
 	TYPE_SYN    = 1
 	TYPE_SYNACK = 2
@@ -16,11 +15,11 @@ const (
 	TYPE_FINACK = 6
 )
 
-const MAGIC_BYTE = 0x55 // my magic byte for ipk
-const MAX_PAYLOAD = 1100 // less than 1200 to be safe
-const HEADER_SIZE = 21 // sum of all header fields
+const MAGIC_BYTE = 0x55 // magic byte
+const MAX_PAYLOAD = 1100
+const HEADER_SIZE = 21
 
-// Packet is my struct for sending
+// packet struct for sending
 type Packet struct {
 	Magic    uint8
 	Type     uint8
@@ -28,7 +27,7 @@ type Packet struct {
 	SeqNum   uint32
 	AckNum   uint32
 	Checksum uint32
-	Length   uint16 // length of payload
+	Length   uint16
 	Payload  []byte
 }
 
@@ -43,13 +42,13 @@ func (p *Packet) ToBytes() []byte {
 	binary.BigEndian.PutUint32(buf[6:10], p.SeqNum)
 	binary.BigEndian.PutUint32(buf[10:14], p.AckNum)
 	
-	// put zero to checksum for now
+	// put zero to checksum
 	binary.BigEndian.PutUint32(buf[14:18], 0)
 	
 	p.Length = uint16(len(p.Payload))
 	binary.BigEndian.PutUint16(buf[18:20], p.Length)
 	
-	// unused byte just to align
+	// just to align
 	buf[20] = 0
 	
 	// copy data to end
@@ -77,6 +76,7 @@ func ParsePacket(data []byte) (*Packet, error) {
 		return nil, fmt.Errorf("bad byte")
 	}
 
+	// THIS WAS RECOMMENDED BY GEMINI
 	p.Type = data[1]
 	p.ConnId = binary.BigEndian.Uint32(data[2:6])
 	p.SeqNum = binary.BigEndian.Uint32(data[6:10])
@@ -85,21 +85,19 @@ func ParsePacket(data []byte) (*Packet, error) {
 	p.Length = binary.BigEndian.Uint16(data[18:20])
 
 	// verify crc
-	// need to copy because i will change checksum to 0
-	tmp := make([]byte, len(data))
-	copy(tmp, data)
-	binary.BigEndian.PutUint32(tmp[14:18], 0) // zero out for check
+	// save it and zero out for check
+	savedCheck := p.Checksum
+	binary.BigEndian.PutUint32(data[14:18], 0) 
 	
-	calcCheck := crc32.ChecksumIEEE(tmp)
-	if calcCheck != p.Checksum {
-		return nil, fmt.Errorf("wrong checksum, packet is broken")
+	if crc32.ChecksumIEEE(data) != savedCheck {
+		return nil, fmt.Errorf("wrong checksum")
 	}
 
-	// get payload if it has some
+	// get payload
 	if p.Length > 0 {
-		// check if we really have enough data
+		// check if there is enough data
 		if len(data) < int(HEADER_SIZE + p.Length) {
-			return nil, fmt.Errorf("data length is lying")
+			return nil, fmt.Errorf("data length is not correct")
 		}
 		p.Payload = make([]byte, p.Length)
 		copy(p.Payload, data[HEADER_SIZE:HEADER_SIZE+p.Length])
