@@ -2,13 +2,8 @@
 
 package main
 
-// UDP proxy pro simulaci síťových chyb – loss, reorder, duplicate, delay, jitter.
-// Použití: go run test_proxy.go -listen :8000 -target :9000 -loss 20 -duplicate 10 -reorder 30 -delay 100 -jitter 50
-// Všechny parametry jsou volitelné, hodnoty v procentech (0-100) nebo milisekundách.
-
 import (
 	"crypto/rand"
-	"encoding/binary"
 	"flag"
 	"fmt"
 	"log"
@@ -19,13 +14,13 @@ import (
 )
 
 var (
-	listenAddr  = flag.String("listen", ":8000", "address to listen on")
-	targetAddr  = flag.String("target", ":9000", "address to forward to")
-	lossPct     = flag.Int("loss", 0, "packet loss percentage (0-100)")
-	dupPct      = flag.Int("duplicate", 0, "packet duplication percentage (0-100)")
-	reorderPct  = flag.Int("reorder", 0, "packet reordering percentage (0-100)")
-	delayMs     = flag.Int("delay", 0, "base delay in milliseconds")
-	jitterMs    = flag.Int("jitter", 0, "additional random jitter in milliseconds")
+	listenAddr = flag.String("listen", ":8000", "address to listen on")
+	targetAddr = flag.String("target", ":9000", "address to forward to")
+	lossPct    = flag.Int("loss", 0, "packet loss percentage (0-100)")
+	dupPct     = flag.Int("duplicate", 0, "packet duplication percentage (0-100)")
+	reorderPct = flag.Int("reorder", 0, "packet reordering percentage (0-100)")
+	delayMs    = flag.Int("delay", 0, "base delay in milliseconds")
+	jitterMs   = flag.Int("jitter", 0, "additional random jitter in milliseconds")
 )
 
 type pendingPacket struct {
@@ -33,12 +28,14 @@ type pendingPacket struct {
 	addr *net.UDPAddr
 }
 
-// crypt/rand int in [0, max)
 func randInt(max int) int {
 	if max <= 0 {
 		return 0
 	}
-	n, _ := rand.Int(rand.Reader, big.NewInt(int64(max)))
+	n, err := rand.Int(rand.Reader, big.NewInt(int64(max)))
+	if err != nil {
+		return 0
+	}
 	return int(n.Int64())
 }
 
@@ -64,7 +61,6 @@ func main() {
 	fmt.Printf("UDP Proxy: %s → %s | loss=%d%% dup=%d%% reorder=%d%% delay=%dms jitter=%dms\n",
 		*listenAddr, *targetAddr, *lossPct, *dupPct, *reorderPct, *delayMs, *jitterMs)
 
-	// map client addr -> last packet for reordering
 	var mu sync.Mutex
 	lastPacket := make(map[string]*pendingPacket)
 
@@ -81,7 +77,6 @@ func main() {
 
 		// loss
 		if *lossPct > 0 && randInt(100) < *lossPct {
-			// drop silently
 			continue
 		}
 
