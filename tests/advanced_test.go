@@ -147,7 +147,8 @@ func TestTimeout_ClientExitsWhenServerDies(t *testing.T) {
 	if err := buildBinary(); err != nil {
 		t.Fatal(err)
 	}
-	data := generateRandom(50 * 1024)
+	// Use a large file so it doesn't finish before the server is killed
+	data := generateRandom(5000 * 1024)
 	in := createTempFile(t, "clikill*.in", data)
 	out := filepath.Join(os.TempDir(), "clikill.out")
 	defer os.Remove(in)

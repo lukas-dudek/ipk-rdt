@@ -155,6 +155,8 @@ func runProxy(t *testing.T, listenAddr, targetAddr string, cfg impairmentConfig)
 		var mu sync.Mutex
 		lastPacket := make(map[string]*pendingPacket)
 
+		var activeClient *net.UDPAddr
+
 		buf := make([]byte, 4096)
 		for {
 			select {
@@ -173,13 +175,25 @@ func runProxy(t *testing.T, listenAddr, targetAddr string, cfg impairmentConfig)
 			data := make([]byte, n)
 			copy(data, buf[:n])
 
+			destAddr := taddr
+			if clientAddr.String() == taddr.String() {
+				// Packet from server -> route to client
+				if activeClient == nil {
+					continue // nowhere to send
+				}
+				destAddr = activeClient
+			} else {
+				// Packet from client -> route to server, remember client
+				activeClient = clientAddr
+			}
+
 			// loss
 			if cfg.lossPct > 0 && randInt(100) < cfg.lossPct {
 				continue
 			}
 			// duplicate
 			if cfg.dupPct > 0 && randInt(100) < cfg.dupPct {
-				go sendDelayed(conn, taddr, data, cfg.delayMs, cfg.jitterMs)
+				go sendDelayed(conn, destAddr, data, cfg.delayMs, cfg.jitterMs)
 			}
 			// reorder
 			clientKey := clientAddr.String()
@@ -188,13 +202,13 @@ func runProxy(t *testing.T, listenAddr, targetAddr string, cfg impairmentConfig)
 			if cfg.reorderPct > 0 && pending != nil && randInt(100) < cfg.reorderPct {
 				lastPacket[clientKey] = &pendingPacket{data: data, addr: clientAddr}
 				mu.Unlock()
-				go sendDelayed(conn, taddr, data, cfg.delayMs, cfg.jitterMs)
-				go sendDelayed(conn, taddr, pending.data, cfg.delayMs, cfg.jitterMs)
+				go sendDelayed(conn, destAddr, data, cfg.delayMs, cfg.jitterMs)
+				go sendDelayed(conn, destAddr, pending.data, cfg.delayMs, cfg.jitterMs)
 				continue
 			}
 			lastPacket[clientKey] = &pendingPacket{data: data, addr: clientAddr}
 			mu.Unlock()
-			go sendDelayed(conn, taddr, data, cfg.delayMs, cfg.jitterMs)
+			go sendDelayed(conn, destAddr, data, cfg.delayMs, cfg.jitterMs)
 		}
 	}()
 
