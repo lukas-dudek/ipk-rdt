@@ -70,7 +70,6 @@ func runServer(cfg *Config) error {
 
 	// Retransmission loop for SYNACK
 	handshakeStart := time.Now()
-	timeoutDur := time.Duration(cfg.Timeout) * time.Second
 	gotAck := false
 
 	for !gotAck {
