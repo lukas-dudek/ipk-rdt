@@ -128,7 +128,7 @@ func TestTimeout_EmptyTransfer(t *testing.T) {
 	
 	// Start server with 2s timeout
 	start := time.Now()
-	srv := runServer(t, 31008, out, 2)
+	srv := runServer(t, 41008, out, 2)
 	
 	// Wait for server to exit due to inactivity (no client connects)
 	err := srv.Wait()
@@ -154,7 +154,7 @@ func TestTimeout_ClientExitsWhenServerDies(t *testing.T) {
 	defer os.Remove(in)
 	defer os.Remove(out)
 
-	srv := runServer(t, 31009, out, 5)
+	srv := runServer(t, 41009, out, 5)
 	
 	// kill server very quickly so the client gets stuck and times out
 	go func() {
@@ -162,7 +162,7 @@ func TestTimeout_ClientExitsWhenServerDies(t *testing.T) {
 		srv.Process.Kill()
 	}()
 
-	err := runClient(t, 31009, in, 2)
+	err := runClient(t, 41009, in, 2)
 	if err == nil {
 		t.Fatal("expected client to fail due to timeout when server dies, but it succeeded")
 	}
