@@ -56,8 +56,11 @@ func parseCLI() (*Config, error) {
 	if !cfg.IsServer && !cfg.IsClient {
 		return nil, fmt.Errorf("must specify either -s or -c")
 	}
-	if cfg.Port == 0 {
-		return nil, fmt.Errorf("missing port (-p)")
+	if cfg.Port <= 0 || cfg.Port > 65535 {
+		return nil, fmt.Errorf("missing or invalid port (-p)")
+	}
+	if cfg.Timeout <= 0 {
+		return nil, fmt.Errorf("timeout must be greater than 0")
 	}
 
 	if cfg.IsClient {
