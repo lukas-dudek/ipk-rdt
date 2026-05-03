@@ -43,7 +43,7 @@ func runServer(t *testing.T, port int, outFile string, timeout int) *exec.Cmd {
 		"-w", fmt.Sprintf("%d", timeout),
 	)
 	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
+	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("server start: %v", err)
 	}
@@ -62,7 +62,7 @@ func runClient(t *testing.T, port int, inFile string, timeout int) error {
 		"-w", fmt.Sprintf("%d", timeout),
 	)
 	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
+	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
 
