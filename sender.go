@@ -162,6 +162,7 @@ func runClient(cfg *Config) error {
 				
 				rawBytes := dataPkt.ToBytes()
 				conn.Write(rawBytes)
+				time.Sleep(1 * time.Millisecond) // Pacing to prevent kernel UDP buffer overflow
 				// fmt.Fprintf(os.Stderr, "Sent DATA seq=%d\n", nextSeq)
 				
 				window[nextSeq] = &windowPacket{
@@ -193,6 +194,7 @@ func runClient(cfg *Config) error {
 						// Fast retransmit
 						if wp, ok := window[baseSeq]; ok {
 							conn.Write(wp.bytesRaw)
+							time.Sleep(1 * time.Millisecond) // Pacing
 						}
 					}
 				}
@@ -215,6 +217,7 @@ func runClient(cfg *Config) error {
 						if dupAckCount == 3 {
 							if wp, ok := window[baseSeq]; ok {
 								conn.Write(wp.bytesRaw)
+								time.Sleep(1 * time.Millisecond) // Pacing
 							}
 						}
 					}
@@ -235,6 +238,7 @@ func runClient(cfg *Config) error {
 			if now.Sub(wp.sentAt) > wp.rto {
 				fmt.Fprintf(os.Stderr, "Timeout seq=%d, retransmitting\n", seq)
 				conn.Write(wp.bytesRaw)
+				time.Sleep(1 * time.Millisecond) // Pacing
 				wp.sentAt = now // restart timer
 				wp.rto = wp.rto * 2 // backoff
 				if wp.rto > 4 * time.Second {
