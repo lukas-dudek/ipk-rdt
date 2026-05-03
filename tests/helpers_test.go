@@ -167,10 +167,7 @@ func runProxy(t *testing.T, listenAddr, targetAddr string, cfg impairmentConfig)
 			conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 			n, clientAddr, err := conn.ReadFromUDP(buf)
 			if err != nil {
-				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-					continue
-				}
-				return
+				continue
 			}
 			data := make([]byte, n)
 			copy(data, buf[:n])

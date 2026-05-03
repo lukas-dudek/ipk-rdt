@@ -156,9 +156,9 @@ func TestTimeout_ClientExitsWhenServerDies(t *testing.T) {
 
 	srv := runServer(t, 31009, out, 5)
 	
-	// kill server after 500ms so the client gets stuck and times out
+	// kill server very quickly so the client gets stuck and times out
 	go func() {
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(5 * time.Millisecond)
 		srv.Process.Kill()
 	}()
 
