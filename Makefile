@@ -14,3 +14,6 @@ clean:
 
 NixDevShellName:
 	@echo "go"
+
+test:
+	cd tests && go test -v -timeout 300s .
