@@ -9,11 +9,11 @@ import (
 )
 
 func runClient(cfg *Config) error {
-	fmt.Printf("Starting client to send to %s:%d (timeout: %ds)\n", cfg.Host, cfg.Port, cfg.Timeout)
+	fmt.Fprintf(os.Stderr, "Starting client to send to %s:%d (timeout: %ds)\n", cfg.Host, cfg.Port, cfg.Timeout)
 	if cfg.Input != "" && cfg.Input != "-" {
-		fmt.Printf("Will read from file: %s\n", cfg.Input)
+		fmt.Fprintf(os.Stderr, "Will read from file: %s\n", cfg.Input)
 	} else {
-		fmt.Printf("Will read from stdin\n")
+		fmt.Fprintf(os.Stderr, "Will read from stdin\n")
 	}
 
 	// resolve address
@@ -43,7 +43,7 @@ func runClient(cfg *Config) error {
 		AckNum: 0,
 	}
 	
-	fmt.Println("Sending SYN...")
+	fmt.Fprintln(os.Stderr, "Sending SYN...")
 	
 	// Retransmission loop for SYN
 	handshakeStart := time.Now()
@@ -71,7 +71,7 @@ func runClient(cfg *Config) error {
 
 		resp, err := ParsePacket(buffer[:n])
 		if err == nil && resp.Type == TYPE_SYNACK && resp.ConnId == connId {
-			fmt.Println("Got SYNACK")
+			fmt.Fprintln(os.Stderr, "Got SYNACK")
 			gotSynack = true
 		}
 	}
@@ -85,7 +85,7 @@ func runClient(cfg *Config) error {
 		AckNum: 0,
 	}
 	conn.Write(ack.ToBytes())
-	fmt.Println("Sent ACK, connection established")
+	fmt.Fprintln(os.Stderr, "Sent ACK, connection established")
 
 	// prepare input file or stdin
 	var inputFile *os.File
@@ -100,7 +100,7 @@ func runClient(cfg *Config) error {
 		inputFile = f
 	}
 
-	fmt.Println("Start sending data with sliding window...")
+	fmt.Fprintln(os.Stderr, "Start sending data with sliding window...")
 	dataBuf := make([]byte, MAX_PAYLOAD)
 
 	// receive ACKs in background
@@ -161,7 +161,7 @@ func runClient(cfg *Config) error {
 				
 				rawBytes := dataPkt.ToBytes()
 				conn.Write(rawBytes)
-				// fmt.Printf("Sent DATA seq=%d\n", nextSeq)
+				// fmt.Fprintf(os.Stderr, "Sent DATA seq=%d\n", nextSeq)
 				
 				window[nextSeq] = &windowPacket{
 					bytesRaw: rawBytes,
@@ -189,7 +189,7 @@ func runClient(cfg *Config) error {
 			for seq := range window {
 				if seq < baseSeq {
 					delete(window, seq)
-					// fmt.Printf("Acked seq=%d\n", seq)
+					// fmt.Fprintf(os.Stderr, "Acked seq=%d\n", seq)
 				}
 			}
 		case <-time.After(10 * time.Millisecond):
@@ -200,7 +200,7 @@ func runClient(cfg *Config) error {
 		now := time.Now()
 		for seq, wp := range window {
 			if now.Sub(wp.sentAt) > wp.rto {
-				fmt.Printf("Timeout seq=%d, retransmitting\n", seq)
+				fmt.Fprintf(os.Stderr, "Timeout seq=%d, retransmitting\n", seq)
 				conn.Write(wp.bytesRaw)
 				wp.sentAt = now // restart timer
 				wp.rto = wp.rto * 2 // backoff
@@ -211,7 +211,7 @@ func runClient(cfg *Config) error {
 		}
 	}
 
-	fmt.Println("All data sent and acked")
+	fmt.Fprintln(os.Stderr, "All data sent and acked")
 
 	// Teardown send FIN
 	fin := Packet{
@@ -222,7 +222,7 @@ func runClient(cfg *Config) error {
 		AckNum: 0,
 	}
 
-	fmt.Println("Sending FIN...")
+	fmt.Fprintln(os.Stderr, "Sending FIN...")
 	
 	teardownStart := time.Now()
 	gotFinack := false
@@ -244,7 +244,7 @@ func runClient(cfg *Config) error {
 		
 		p, err := ParsePacket(buffer[:n])
 		if err == nil && p.Type == TYPE_FINACK && p.ConnId == connId {
-			fmt.Println("Got FINACK, closing connection")
+			fmt.Fprintln(os.Stderr, "Got FINACK, closing connection")
 			gotFinack = true
 		}
 	}

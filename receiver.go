@@ -12,11 +12,11 @@ func runServer(cfg *Config) error {
 	if addr == "" {
 		addr = "0.0.0.0"
 	}
-	fmt.Printf("Starting server on %s:%d (timeout: %ds)\n", addr, cfg.Port, cfg.Timeout)
+	fmt.Fprintf(os.Stderr, "Starting server on %s:%d (timeout: %ds)\n", addr, cfg.Port, cfg.Timeout)
 	if cfg.Output != "" && cfg.Output != "-" {
-		fmt.Printf("Will write to file: %s\n", cfg.Output)
+		fmt.Fprintf(os.Stderr, "Will write to file: %s\n", cfg.Output)
 	} else {
-		fmt.Printf("Will write to stdout\n")
+		fmt.Fprintf(os.Stderr, "Will write to stdout\n")
 	}
 
 	listenAddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", addr, cfg.Port))
@@ -44,12 +44,12 @@ func runServer(cfg *Config) error {
 
 		p, err := ParsePacket(buffer[:n])
 		if err != nil {
-			fmt.Println("bad packet ignored")
+			fmt.Fprintln(os.Stderr, "bad packet ignored")
 			continue
 		}
 
 		if p.Type == TYPE_SYN {
-			fmt.Printf("Got SYN from %v\n", cAddr)
+			fmt.Fprintf(os.Stderr, "Got SYN from %v\n", cAddr)
 			activeConnId = p.ConnId
 			clientAddr = cAddr
 			break
@@ -65,7 +65,7 @@ func runServer(cfg *Config) error {
 		AckNum: 0,
 	}
 	conn.WriteToUDP(synack.ToBytes(), clientAddr)
-	fmt.Println("Sending SYNACK...")
+	fmt.Fprintln(os.Stderr, "Sending SYNACK...")
 
 	// Retransmission loop for SYNACK
 	handshakeStart := time.Now()
@@ -93,11 +93,11 @@ func runServer(cfg *Config) error {
 		}
 
 		if resp.Type == TYPE_ACK && resp.ConnId == activeConnId {
-			fmt.Println("Got ACK, handshake complete")
+			fmt.Fprintln(os.Stderr, "Got ACK, handshake complete")
 			gotAck = true
 		} else if (resp.Type == TYPE_DATA || resp.Type == TYPE_FIN) && resp.ConnId == activeConnId {
 			// If clients ACK was lost but DATA or FIN arrived handshake is complete
-			fmt.Printf("Got packet type %d instead of ACK, handshake complete\n", resp.Type)
+			fmt.Fprintf(os.Stderr, "Got packet type %d instead of ACK, handshake complete\n", resp.Type)
 			gotAck = true
 		}
 	}
@@ -118,7 +118,7 @@ func runServer(cfg *Config) error {
 		outFile = f
 	}
 
-	fmt.Println("Waiting for data packets...")
+	fmt.Fprintln(os.Stderr, "Waiting for data packets...")
 	
 	expectedSeq := uint32(0)
 	finReceived := false
@@ -136,12 +136,12 @@ func runServer(cfg *Config) error {
 
 		p, err := ParsePacket(buffer[:n])
 		if err != nil {
-			fmt.Println("Bad packet, ignore")
+			fmt.Fprintln(os.Stderr, "Bad packet, ignore")
 			continue
 		}
 
 		if p.ConnId != activeConnId {
-			fmt.Println("Packet from wrong connection")
+			fmt.Fprintln(os.Stderr, "Packet from wrong connection")
 			continue
 		}
 
@@ -182,12 +182,12 @@ func runServer(cfg *Config) error {
 		} else if p.Type == TYPE_FIN {
 			finReceived = true
 			finSeq = p.SeqNum
-			fmt.Printf("Got FIN for seq %d, buffering until all data is written\n", finSeq)
+			fmt.Fprintf(os.Stderr, "Got FIN for seq %d, buffering until all data is written\n", finSeq)
 		}
 
 		// Check if we can safely teardown
 		if finReceived && len(packetBuffer) == 0 && expectedSeq >= finSeq {
-			fmt.Println("All data written, sending FINACK")
+			fmt.Fprintln(os.Stderr, "All data written, sending FINACK")
 			finack := Packet{
 				Magic:  MAGIC_BYTE,
 				Type:   TYPE_FINACK,
@@ -196,7 +196,7 @@ func runServer(cfg *Config) error {
 				AckNum: expectedSeq,
 			}
 			conn.WriteToUDP(finack.ToBytes(), clientAddr)
-			fmt.Println("Sent FINACK, entering TIME_WAIT...")
+			fmt.Fprintln(os.Stderr, "Sent FINACK, entering TIME_WAIT...")
 			
 			// TIME_WAIT loop to re-ack any retransmitted FINs
 			timeWaitEnd := time.Now().Add(2 * time.Second)
@@ -210,11 +210,11 @@ func runServer(cfg *Config) error {
 				if err == nil && p.Type == TYPE_FIN && p.ConnId == activeConnId {
 					// client didn't get our FINACK, send it again
 					conn.WriteToUDP(finack.ToBytes(), clientAddr)
-					fmt.Println("Retransmitted FINACK")
+					fmt.Fprintln(os.Stderr, "Retransmitted FINACK")
 				}
 			}
 			
-			fmt.Println("Server goodbye")
+			fmt.Fprintln(os.Stderr, "Server goodbye")
 			break
 		}
 	}
