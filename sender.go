@@ -103,18 +103,18 @@ func runClient(cfg *Config) error {
 	fmt.Fprintln(os.Stderr, "Start sending data with sliding window...")
 	dataBuf := make([]byte, MAX_PAYLOAD)
 
-	// receive ACKs in background
-	ackCh := make(chan uint32, 100)
+	// receive packets in background
+	packetCh := make(chan *Packet, 100)
 	go func() {
-		ackBuf := make([]byte, 2048)
+		buf := make([]byte, 2048)
 		for {
-			n, _, err := conn.ReadFromUDP(ackBuf)
+			n, _, err := conn.ReadFromUDP(buf)
 			if err != nil {
 				break
 			}
-			p, err := ParsePacket(ackBuf[:n])
-			if err == nil && p.Type == TYPE_ACK && p.ConnId == connId {
-				ackCh <- p.AckNum
+			p, err := ParsePacket(buf[:n])
+			if err == nil && p.ConnId == connId {
+				packetCh <- p
 			}
 		}
 	}()
@@ -180,34 +180,17 @@ func runClient(cfg *Config) error {
 
 		// process acks or wait a little
 		select {
-		case ack := <-ackCh:
-			lastProgress = time.Now() // any ACK means server is alive
-			if ack > baseSeq {
-				baseSeq = ack
-				dupAckCount = 0
-			} else if ack == baseSeq {
-				dupAckCount++
-				if dupAckCount == 3 {
-					// Fast retransmit
-					if wp, ok := window[baseSeq]; ok {
-						conn.Write(wp.bytesRaw)
-					}
-				}
-			}
-			for seq := range window {
-				if seq < baseSeq {
-					delete(window, seq)
-				}
-			}
-			// Drain remaining ACKs in channel
-			for len(ackCh) > 0 {
-				ack := <-ackCh
+		case p := <-packetCh:
+			lastProgress = time.Now() // any packet means server is alive
+			if p.Type == TYPE_ACK {
+				ack := p.AckNum
 				if ack > baseSeq {
 					baseSeq = ack
 					dupAckCount = 0
 				} else if ack == baseSeq {
 					dupAckCount++
 					if dupAckCount == 3 {
+						// Fast retransmit
 						if wp, ok := window[baseSeq]; ok {
 							conn.Write(wp.bytesRaw)
 						}
@@ -216,6 +199,29 @@ func runClient(cfg *Config) error {
 				for seq := range window {
 					if seq < baseSeq {
 						delete(window, seq)
+					}
+				}
+			}
+			// Drain remaining packets in channel
+			for len(packetCh) > 0 {
+				p := <-packetCh
+				if p.Type == TYPE_ACK {
+					ack := p.AckNum
+					if ack > baseSeq {
+						baseSeq = ack
+						dupAckCount = 0
+					} else if ack == baseSeq {
+						dupAckCount++
+						if dupAckCount == 3 {
+							if wp, ok := window[baseSeq]; ok {
+								conn.Write(wp.bytesRaw)
+							}
+						}
+					}
+					for seq := range window {
+						if seq < baseSeq {
+							delete(window, seq)
+						}
 					}
 				}
 			}
@@ -261,18 +267,14 @@ func runClient(cfg *Config) error {
 
 		conn.Write(fin.ToBytes())
 		
-		conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
-		buffer := make([]byte, 2048)
-		n, _, err := conn.ReadFromUDP(buffer)
-		if err != nil {
+		select {
+		case p := <-packetCh:
+			if p.Type == TYPE_FINACK {
+				fmt.Fprintln(os.Stderr, "Got FINACK, closing connection")
+				gotFinack = true
+			}
+		case <-time.After(500 * time.Millisecond):
 			// timeout, loop and retransmit FIN
-			continue
-		}
-		
-		p, err := ParsePacket(buffer[:n])
-		if err == nil && p.Type == TYPE_FINACK && p.ConnId == connId {
-			fmt.Fprintln(os.Stderr, "Got FINACK, closing connection")
-			gotFinack = true
 		}
 	}
 

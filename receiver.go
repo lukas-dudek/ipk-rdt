@@ -35,11 +35,12 @@ func runServer(cfg *Config) error {
 	var clientAddr *net.UDPAddr
 
 	// wait for SYN
+	timeoutDur := time.Duration(cfg.Timeout) * time.Second
 	for {
-		// don't set timeout here waiting for first client
+		conn.SetReadDeadline(time.Now().Add(timeoutDur))
 		n, cAddr, err := conn.ReadFromUDP(buffer)
 		if err != nil {
-			continue
+			return fmt.Errorf("timeout waiting for client SYN: %v", err)
 		}
 
 		p, err := ParsePacket(buffer[:n])
