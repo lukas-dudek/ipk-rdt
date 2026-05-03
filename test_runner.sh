@@ -1,6 +1,7 @@
 #!/bin/sh
 # ============================================================
-# IPK-RDT POSIX test runner – finální (stdin fix + proxy skip)
+# IPK-RDT kompletní test suite – s čištěním portů a proxy
+# Spusť: ./test_runner.sh
 # ============================================================
 set -eu
 
@@ -18,7 +19,7 @@ TEST_TIMEOUT=40
 header() { printf '\n%s=== %s ===%s\n' "$C" "$1" "$N"; }
 
 # ---------------------------------------------------------
-# Watchdog – spustí subshell, po timeoutu ho zabije
+# Watchdog
 # ---------------------------------------------------------
 run_with_timeout() {
     _wt_tout="$1"; shift
@@ -31,6 +32,105 @@ run_with_timeout() {
     kill $_wt_wdog 2>/dev/null
     wait $_wt_wdog 2>/dev/null
     return $_wt_ret
+}
+
+# ---------------------------------------------------------
+# Pomocné funkce
+# ---------------------------------------------------------
+
+# Zabít procesy na daném portu pomocí ss (musí být v systému)
+cleanup_port() {
+    port="$1"
+    # Najdi PIDy naslouchající na UDP portu
+    pids=$(ss -ulpn 2>/dev/null | grep ":$port " | awk '{print $NF}' | sed -n 's/.*pid=\([0-9]*\).*/\1/p')
+    for pid in $pids; do
+        kill "$pid" 2>/dev/null || true
+    done
+    sleep 0.2
+}
+
+# Generátory
+mktxt() {
+    _s="$1" _f="$2"
+    blk="Hello IPK reliable test. 0123456789 ABCDEF. The quick brown fox. "
+    bl=${#blk}
+    :>"$_f"
+    w=0
+    while [ "$w" -lt "$_s" ]; do
+        r=$((_s-w))
+        if [ "$r" -ge "$bl" ]; then
+            printf '%s' "$blk" >>"$_f"
+            w=$((w+bl))
+        else
+            printf "%.${r}s" "$blk" >>"$_f"
+            w="$_s"
+        fi
+    done
+}
+mkzero() { dd if=/dev/zero of="$2" bs="$1" count=1 2>/dev/null; }
+mkrand() { dd if=/dev/urandom of="$2" bs="$1" count=1 2>/dev/null; }
+mkall() {
+    if [ $# -ge 2 ]; then _f="$2"; else _f="$1"; fi
+    :>"$_f"
+    i=0
+    while [ "$i" -le 255 ]; do
+        printf "\\$(printf '%03o' "$i")" >>"$_f"
+        i=$((i+1))
+    done
+}
+
+srv() { ./ipk-rdt -s -p "$1" -a 127.0.0.1 -o "$2" -w "$3" >/dev/null 2>&1; }
+cli() { ./ipk-rdt -c -a 127.0.0.1 -p "$1" -i "$2" -w "$3" >/dev/null 2>&1; }
+
+# Proxy s čištěním portů a čekáním na spuštění
+proxy() {
+    pp="$1" tp="$2" l="$3" d="$4" r="$5" dl="$6" ji="$7"
+    cleanup_port "$pp"
+    cleanup_port "$tp"
+    go run test_proxy.go \
+        -listen "127.0.0.1:$pp" \
+        -target "127.0.0.1:$tp" \
+        -loss "$l" -duplicate "$d" -reorder "$r" \
+        -delay "$dl" -jitter "$ji" >/dev/null 2>&1 &
+    # počkej, až proxy začne naslouchat (max 2 sekundy)
+    i=0
+    while [ $i -lt 20 ]; do
+        if ss -ulpn 2>/dev/null | grep -q ":$pp "; then
+            break
+        fi
+        sleep 0.1
+        i=$((i+1))
+    done
+}
+
+test_basic() {
+    _tb_nm="$1" _tb_sz="$2" _tb_gen="$3" _tb_to="$4" _tb_port="$5"
+    in="$TMPDIR/$_tb_nm.in" out="$TMPDIR/$_tb_nm.out"
+    $_tb_gen "$_tb_sz" "$in"
+    srv "$_tb_port" "$out" "$_tb_to" &
+    spid=$!
+    sleep 0.2
+    cli "$_tb_port" "$in" "$_tb_to"
+    wait $spid
+    cmp -s "$in" "$out"
+}
+
+test_proxied() {
+    nm="$1" sz="$2" gen="$3" to="$4"
+    pp="$5" tp="$6" l="$7" d="$8" r="$9" dl="${10}" ji="${11}"
+    in="$TMPDIR/$nm.in" out="$TMPDIR/$nm.out"
+    $gen "$sz" "$in"
+    proxy "$pp" "$tp" "$l" "$d" "$r" "$dl" "$ji"
+    xpid=$!
+    trap 'kill $xpid 2>/dev/null; wait $xpid 2>/dev/null' EXIT
+    srv "$tp" "$out" "$to" &
+    spid=$!
+    sleep 0.2
+    cli "$pp" "$in" "$to"
+    wait $spid; ok=$?
+    kill $xpid 2>/dev/null; wait $xpid 2>/dev/null
+    trap - EXIT
+    [ $ok -eq 0 ] && cmp -s "$in" "$out"
 }
 
 test_one() {
@@ -57,60 +157,7 @@ go build -o ipk-rdt . 2>&1
 echo "  Binary ready."
 
 # ---------------------------------------------------------
-# Generátory – opraveno mkall (přijímá [velikost] soubor)
-# ---------------------------------------------------------
-mktxt() {
-    _s="$1" _f="$2"
-    blk="Hello IPK reliable test. 0123456789 ABCDEF. The quick brown fox. "
-    bl=${#blk}
-    :>"$_f"
-    w=0
-    while [ "$w" -lt "$_s" ]; do
-        r=$((_s-w))
-        if [ "$r" -ge "$bl" ]; then
-            printf '%s' "$blk" >>"$_f"
-            w=$((w+bl))
-        else
-            printf "%.${r}s" "$blk" >>"$_f"
-            w="$_s"
-        fi
-    done
-}
-
-mkzero() { dd if=/dev/zero of="$2" bs="$1" count=1 2>/dev/null; }
-mkrand() { dd if=/dev/urandom of="$2" bs="$1" count=1 2>/dev/null; }
-
-mkall() {
-    # akceptuje volání: mkall soubor  NEBO  mkall velikost soubor
-    if [ $# -ge 2 ]; then _f="$2"; else _f="$1"; fi
-    :>"$_f"
-    i=0
-    while [ "$i" -le 255 ]; do
-        printf "\\$(printf '%03o' "$i")" >>"$_f"
-        i=$((i+1))
-    done
-}
-
-srv() { ./ipk-rdt -s -p "$1" -a 127.0.0.1 -o "$2" -w "$3" >/dev/null 2>&1; }
-cli() { ./ipk-rdt -c -a 127.0.0.1 -p "$1" -i "$2" -w "$3" >/dev/null 2>&1; }
-
-# ---------------------------------------------------------
-# Testovací akce
-# ---------------------------------------------------------
-test_basic() {
-    _tb_nm="$1" _tb_sz="$2" _tb_gen="$3" _tb_to="$4" _tb_port="$5"
-    in="$TMPDIR/$_tb_nm.in" out="$TMPDIR/$_tb_nm.out"
-    $_tb_gen "$_tb_sz" "$in"
-    srv "$_tb_port" "$out" "$_tb_to" &
-    spid=$!
-    sleep 0.2
-    cli "$_tb_port" "$in" "$_tb_to"
-    wait $spid
-    cmp -s "$in" "$out"
-}
-
-# ---------------------------------------------------------
-# 1) BASIC TRANSFERS
+# 1) BASIC
 # ---------------------------------------------------------
 header "BASIC"
 
@@ -121,11 +168,9 @@ test_one "100 KB text" test_basic "100k" 102400 mktxt 15 10004
 test_one "1 MB random" test_basic "1mb" 1048576 mkrand 30 10005
 test_one "All bytes 0x00..0xFF" test_basic "allb" 256 mkall 5 10007
 
-# Stdin/stdout – oprava: server zapisuje do SOUBORU (ne stdout)
 test_one "Stdin -> stdout" sh -c '
     base="$TMPDIR"
     echo "Hello stdin test 12345" > "$base/std.in"
-    # server výstup do souboru, debug jde do stderr (přesměrováno v srv)
     ./ipk-rdt -s -p 10006 -o "$base/std.serverout" -w 5 >/dev/null 2>&1 &
     spid=$!
     sleep 0.2
@@ -139,48 +184,18 @@ test_one "Stdin -> stdout" sh -c '
 '
 
 # ---------------------------------------------------------
-# 2) IMPAIRMENT TESTS – přeskočeny, dokud proxy nefunguje
+# 2) IMPAIRMENTY (s proxy)
 # ---------------------------------------------------------
 header "LOSS / DUP / REORDER / DELAY"
 
-echo "  Proxy tests skipped (test_proxy.go missing or not working)."
-echo ""
-echo "  To enable them, verify that 'go run test_proxy.go' starts"
-echo "  without errors, then uncomment the test block below."
-echo ""
-
-# Po zprovoznění proxy odkomentovat tuto sekci:
-#
-# if [ -f test_proxy.go ]; then
-#     proxy() {
-#         go run test_proxy.go \
-#             -listen "127.0.0.1:$1" -target "127.0.0.1:$2" \
-#             -loss "${3:-0}" -duplicate "${4:-0}" -reorder "${5:-0}" \
-#             -delay "${6:-0}" -jitter "${7:-0}" >/dev/null 2>&1 &
-#     }
-#
-#     test_proxied() {
-#         nm="$1" sz="$2" gen="$3" to="$4"
-#         pp="$5" tp="$6" l="$7" d="$8" r="$9" dl="${10}" ji="${11}"
-#         in="$TMPDIR/$nm.in" out="$TMPDIR/$nm.out"
-#         $gen "$sz" "$in"
-#         proxy "$pp" "$tp" "$l" "$d" "$r" "$dl" "$ji"
-#         xpid=$!
-#         trap 'kill $xpid 2>/dev/null; wait $xpid 2>/dev/null' EXIT
-#         srv "$tp" "$out" "$to" &
-#         spid=$!
-#         sleep 0.2
-#         cli "$pp" "$in" "$to"
-#         wait $spid; ok=$?
-#         kill $xpid 2>/dev/null; wait $xpid 2>/dev/null
-#         trap - EXIT
-#         [ $ok -eq 0 ] && cmp -s "$in" "$out"
-#     }
-#
-#     test_one "10% loss, 50 KB" test_proxied "l10" 51200 mktxt 20 10008 20001 10 0 0 0 0
-#     test_one "20% loss, 30 KB" test_proxied "l20" 30720 mktxt 20 10009 20002 20 0 0 0 0
-#     # ... (ostatní testy)
-# fi
+test_one "10% loss, 50 KB" test_proxied "l10" 51200 mktxt 20 10008 20001 10 0 0 0 0
+test_one "20% loss, 30 KB" test_proxied "l20" 30720 mktxt 20 10009 20002 20 0 0 0 0
+test_one "30% loss, 20 KB" test_proxied "l30" 20480 mktxt 20 10010 20003 30 0 0 0 0
+test_one "20% duplicates, 20 KB" test_proxied "dup" 20480 mktxt 20 10011 20004 0 20 0 0 0
+test_one "40% reorder, 20 KB" test_proxied "reo" 20480 mktxt 20 10012 20005 0 0 40 0 0
+test_one "50ms delay + 15ms jitter, 15 KB" test_proxied "del" 15360 mktxt 25 10013 20006 0 0 0 50 15
+test_one "Combo moderate, 15 KB" test_proxied "comb" 15360 mktxt 30 10014 20007 10 10 20 30 10
+test_one "Combo extreme, 10 KB" test_proxied "combx" 10240 mktxt 30 10015 20008 20 0 30 40 20
 
 # ---------------------------------------------------------
 # 3) TIMEOUT
