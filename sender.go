@@ -134,6 +134,7 @@ func runClient(cfg *Config) error {
 
 	timeoutDur = time.Duration(cfg.Timeout) * time.Second
 	lastProgress := time.Now()
+	dupAckCount := 0
 
 	// main loop
 	for !eof || len(window) > 0 {
@@ -180,16 +181,42 @@ func runClient(cfg *Config) error {
 		// process acks or wait a little
 		select {
 		case ack := <-ackCh:
-			// update base if ack is bigger
+			lastProgress = time.Now() // any ACK means server is alive
 			if ack > baseSeq {
-				lastProgress = time.Now() // some real progress
 				baseSeq = ack
+				dupAckCount = 0
+			} else if ack == baseSeq {
+				dupAckCount++
+				if dupAckCount == 3 {
+					// Fast retransmit
+					if wp, ok := window[baseSeq]; ok {
+						conn.Write(wp.bytesRaw)
+					}
+				}
 			}
-			// remove acked packets from window
 			for seq := range window {
 				if seq < baseSeq {
 					delete(window, seq)
-					// fmt.Fprintf(os.Stderr, "Acked seq=%d\n", seq)
+				}
+			}
+			// Drain remaining ACKs in channel
+			for len(ackCh) > 0 {
+				ack := <-ackCh
+				if ack > baseSeq {
+					baseSeq = ack
+					dupAckCount = 0
+				} else if ack == baseSeq {
+					dupAckCount++
+					if dupAckCount == 3 {
+						if wp, ok := window[baseSeq]; ok {
+							conn.Write(wp.bytesRaw)
+						}
+					}
+				}
+				for seq := range window {
+					if seq < baseSeq {
+						delete(window, seq)
+					}
 				}
 			}
 		case <-time.After(10 * time.Millisecond):
