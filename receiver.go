@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -20,7 +21,7 @@ func runServer(cfg *Config) error {
 		logf("write to stdout\n")
 	}
 
-	listenAddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", addr, cfg.Port))
+	listenAddr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(addr, strconv.Itoa(cfg.Port)))
 	if err != nil {
 		return fmt.Errorf("bad bind address %v", err)
 	}

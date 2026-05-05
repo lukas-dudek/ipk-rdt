@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"net"
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -17,7 +18,7 @@ func runClient(cfg *Config) error {
 	}
 
 	// resolve address
-	addrStr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
+	addrStr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
 	serverAddr, err := net.ResolveUDPAddr("udp", addrStr)
 	if err != nil {
 		return fmt.Errorf("bad address %v", err)
@@ -75,6 +76,9 @@ func runClient(cfg *Config) error {
 			gotSynack = true
 		}
 	}
+
+	// clear deadline
+	conn.SetReadDeadline(time.Time{})
 
 	// send ACK
 	ack := Packet{

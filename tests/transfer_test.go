@@ -129,6 +129,26 @@ func TestTransfer_LargeFile(t *testing.T) {
 	}
 }
 
+func TestTransfer_VeryLargeFile(t *testing.T) {
+	if err := buildBinary(); err != nil {
+		t.Fatal(err)
+	}
+	data := generateRandom(2500 * 1024) // 2.5 MB (more than 500ms at 1ms pacing)
+	in := createTempFile(t, "vlarge*.in", data)
+	out := filepath.Join(os.TempDir(), "vlarge.out")
+	defer os.Remove(in)
+	defer os.Remove(out)
+
+	srv := runServer(t, 30015, out, 15)
+	if err := runClient(t, 30015, in, 15); err != nil {
+		t.Fatalf("client: %v", err)
+	}
+	srv.Wait()
+	if !compareFiles(t, in, out) {
+		t.Fatal("files mismatch")
+	}
+}
+
 func TestTransfer_BinaryAllByteValues(t *testing.T) {
 	if err := buildBinary(); err != nil {
 		t.Fatal(err)
